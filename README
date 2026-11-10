@@ -1,1 +1,44 @@
+CS 214 Project 3: Simple shell (mysh)
 
+Authors:
+-  Weizhe Yuan (wy271)
+-  Trevor Vetrano (twv6)
+
+mysh reads one command per line (interactive or batch) and runs programs
+or built-ins, with redirection, pipelines, and wildcards.
+
+Design Notes:
+- One read() loop for both modes: buffer to a newline, execute, and only
+  then read again; isatty() picks interactive vs batch.
+- Tokenizer: whitespace splits, > >> < | standalone, # starts a comment.
+- Each | segment is parsed like a full command, redirection included.
+- Program resolution: slash -> path via access(); bare names search
+  /usr/local/bin, /usr/bin, /bin; built-ins handled by mysh; execv only.
+- Wildcards: one * per token, expanded via opendir()/readdir(); patterns
+  starting with * skip dotfiles; no match -> token unchanged.
+- Execution: fork per process; child dup2()s redirection files (0640,
+  O_APPEND for >>) and pipe ends, then execv(); parent closes its pipe
+  ends and waitpid()s all children.
+- Built-ins run in the shell when bare (cd must), in a child inside
+  pipelines; exit waits for the rest of the command to finish.
+- Interactive: prompt is cwd with HOME -> ~; failures print "Exited with
+  status N" / "Terminated by signal"; batch prints nothing and children
+  default to /dev/null stdin.
+
+Test Plan:
+1. Spec examples: batch echo hello; the section 1 interactive session
+   line by line.
+2. Programs: ls, /bin/ls, command not found, which ls, which which.
+3. Built-ins: cd (no arg/bad path/too many args), pwd, exit alone,
+   exit > file, and the spec's exit | echo hello > foo.
+4. Redirection: <, > (mode 640, checked with ls -l), >>, both together,
+   unopenable input.
+5. Pipelines: ls | wc -l, three segments, pwd | cat, cat < f | wc -l,
+   success follows the last process.
+6. Wildcards: *.txt, baz/foo*bar, no match passes through, dotfiles
+   skipped.
+7. Modes: batch children see /dev/null (cat doesn't eat the script),
+   no prompts in batch; interactive "Exited with status 1" before the
+   next prompt, ~ in the prompt.
+8. Robustness: comments, << skips the line, long line, valgrind reports
+   no definitely-lost bytes.
